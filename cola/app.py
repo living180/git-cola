@@ -62,9 +62,9 @@ from PyQt4.QtCore import SIGNAL
 from cola import cmds
 from cola import core
 from cola import compat
+from cola import fsmonitor
 from cola import git
 from cola import gitcfg
-from cola import inotify
 from cola import i18n
 from cola import qtcompat
 from cola import qtutils
@@ -168,11 +168,8 @@ class ColaApplication(object):
         qtcompat.install()
         qtutils.install()
 
-        self.notifier = QtCore.QObject()
-        self.notifier.connect(self.notifier, SIGNAL('update_files()'),
-                              self._update_files, Qt.QueuedConnection)
-        # Call _update_files when inotify detects changes
-        inotify.observer(self._update_files_notifier)
+        QtCore.QObject.connect(fsmonitor.instance(), SIGNAL('files_changed'),
+                               self._update_files)
 
         # Add the default style dir so that we find our icons
         icon_dir = resources.icon_dir()
@@ -209,11 +206,8 @@ class ColaApplication(object):
             self._app.view = view
 
     def _update_files(self):
-        # Respond to inotify updates
+        # Respond to file system updates
         cmds.do(cmds.Refresh)
-
-    def _update_files_notifier(self):
-        self.notifier.emit(SIGNAL('update_files()'))
 
 
 @memoize
@@ -309,8 +303,8 @@ def application_start(context, view):
     # Scan for the first time
     task = _start_update_thread(context.model)
 
-    # Start the inotify thread
-    inotify.start()
+    # Start the filesystem monitor thread
+    fsmonitor.instance().start()
 
     msg_timer = QtCore.QTimer()
     msg_timer.setSingleShot(True)
@@ -321,7 +315,7 @@ def application_start(context, view):
     result = context.app.exec_()
 
     # All done, cleanup
-    inotify.stop()
+    fsmonitor.instance().stop()
     QtCore.QThreadPool.globalInstance().waitForDone()
     del task
 

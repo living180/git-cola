@@ -13,9 +13,9 @@ except ImportError:
 
 from cola import compat
 from cola import core
+from cola import fsmonitor
 from cola import gitcfg
 from cola import gitcmds
-from cola import inotify
 from cola import utils
 from cola import difftool
 from cola import resources
@@ -1015,8 +1015,8 @@ class OpenRepo(Command):
         self.model.set_directory(self.repo_path)
         cfg = gitcfg.current()
         cfg.reset()
-        inotify.stop()
-        inotify.start()
+        fsmonitor.instance().stop()
+        fsmonitor.instance().start()
         self.model.update_status()
 
 
@@ -1437,7 +1437,7 @@ class Stage(Command):
         # Prevent external updates while we are staging files.
         # We update file stats at the end of this operation
         # so there's no harm in ignoring updates from other threads
-        # (e.g. inotify).
+        # (e.g. the file system change monitor).
         with CommandDisabled(UpdateFileStatus):
             self.model.stage_paths(self.paths)
 
