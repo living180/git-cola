@@ -9,7 +9,6 @@ import os
 import os.path
 import select
 from collections import defaultdict
-from threading import Timer
 from threading import Lock
 
 from cola import utils
@@ -67,27 +66,21 @@ class _Monitor(QtCore.QObject):
 
 
 class _BaseThread(QtCore.QThread):
+    #: The delay, in milliseconds, between detecting file system modification
+    #: and triggering the 'files_changed' signal, to coalesce multiple
+    #: modifications into a single signal.
+    _NOTIFICATION_DELAY = 888
+
     def __init__(self, monitor):
         QtCore.QThread.__init__(self)
         self._monitor = monitor
         self._running = True
-        ## Timer used to prevent notification floods
-        self._timer = None
-        ## Lock to protect timer from threading issues
-        self._lock = Lock()
-
-    def trigger(self):
-        """Start a timer which will notify all observers on expiry"""
-        with self._lock:
-            if self._timer is None:
-                self._timer = Timer(0.888, self.notify)
-                self._timer.start()
+        self._pending = False
 
     def notify(self):
         """Notifies all observers"""
+        self._pending = False
         self._monitor.emit(SIGNAL('files_changed'))
-        with self._lock:
-            self._timer = None
 
     @staticmethod
     def _log_enabled_message():
@@ -178,17 +171,26 @@ if AVAILABLE == 'inotify':
                 self._log_enabled_message()
 
                 while self._running:
+                    if self._pending:
+                        timeout = self._NOTIFICATION_DELAY
+                    else:
+                        timeout = None
                     try:
-                        events = poll_obj.poll()
+                        events = poll_obj.poll(timeout)
                     except OSError as e:
                         if e.errno == errno.EINTR:
                             continue
                         else:
                             raise
                     else:
-                        for fd, event in events:
-                            if fd == self._inotify_fd and self._running:
-                                self._handle_events()
+                        if not self._running:
+                            break
+                        elif not events:
+                            self.notify()
+                        else:
+                            for fd, event in events:
+                                if fd == self._inotify_fd:
+                                    self._handle_events()
             finally:
                 if self._inotify_fd is not None:
                     os.close(self._inotify_fd)
@@ -204,7 +206,7 @@ if AVAILABLE == 'inotify':
             for wd, mask, cookie, name in \
                     inotify.read_events(self._inotify_fd):
                 if mask & self._TRIGGER_MASK:
-                    self.trigger()
+                    self._pending = True
 
         def stop(self):
             self._running = False
@@ -265,13 +267,19 @@ if AVAILABLE == 'pywin32':
                                                     self._buffer, True,
                                                     self._FLAGS,
                                                     self._overlapped)
-
-                    win32event.WaitForMultipleObjects(
+                    if self._pending:
+                        timeout = self._NOTIFICATION_DELAY
+                    else:
+                        timeout = win32event.INFINITE
+                    rc = win32event.WaitForMultipleObjects(
                             [self._overlapped.hEvent, self._stop_event], False,
-                            win32event.INFINITE)
+                            timeout)
                     if not self._running:
                         break
-                    self._handle_results()
+                    elif rc == win32event.WAIT_TIMEOUT:
+                        self.notify()
+                    else:
+                        self._handle_results()
             finally:
                 with self._stop_event_lock:
                     if self._stop_event is not None:
@@ -293,7 +301,7 @@ if AVAILABLE == 'pywin32':
                 path = self._worktree + '/' + self._transform_path(path)
                 if (path != self._git_dir
                         and not path.startswith(self._git_dir + '/')):
-                    self.trigger()
+                    self._pending = True
 
         def stop(self):
             self._running = False
