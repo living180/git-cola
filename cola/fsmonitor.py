@@ -246,7 +246,7 @@ if AVAILABLE == 'pywin32':
 
             buf = win32file.AllocateReadBuffer(8192)
             overlapped = pywintypes.OVERLAPPED()
-            overlapped.hEvent = win32event.CreateEvent(None, 0, 0, None)
+            overlapped.hEvent = win32event.CreateEvent(None, True, False, None)
 
             self._log_enabled_message()
 
