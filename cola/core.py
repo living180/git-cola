@@ -198,8 +198,8 @@ def start_command(
     shell = extra.get('shell', False)
     cmd = prep_for_subprocess(cmd, shell=shell)
 
-    if WIN32 and cwd == getcwd():
-        # Windows cannot deal with passing a cwd that contains unicode
+    if WIN32 and PY2 and cwd and cwd == getcwd():
+        # Python2 on Windows cannot handle a cwd that contains unicode
         # but we luckily can pass None when the supplied cwd is the same
         # as our current directory and get the same effect.
         # Not doing this causes unicode encoding errors when launching
