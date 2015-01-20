@@ -78,7 +78,7 @@ def interruptable(func, *args, **opts):
         try:
             result = func(*args, **opts)
         except (IOError, OSError) as e:
-            if e.errno in (errno.EINTR, errno.EINVAL):
+            if e.errno in (errno.EINTR, errno.EAGAIN):
                 continue
             raise e
         else:
