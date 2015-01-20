@@ -266,10 +266,6 @@ class Git(object):
         :returns (status, out, err): exit status, stdout, stderr
 
         """
-        # Allow the user to have the command executed in their working dir.
-        if not _cwd:
-            _cwd = core.getcwd()
-
         extra = {}
 
         if hasattr(os, 'setsid'):
