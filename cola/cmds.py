@@ -1191,6 +1191,7 @@ class Refresh(Command):
 
     def do(self):
         self.model.update_status(update_index=True)
+        fsmonitor.instance().refresh()
 
 
 class RevertEditsCommand(ConfirmAction):
