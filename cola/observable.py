@@ -2,24 +2,24 @@
 """This module provides the Observable class"""
 from __future__ import division, absolute_import, unicode_literals
 
+from collections import defaultdict
+
 
 class Observable(object):
     """Handles subject/observer notifications."""
 
     def __init__(self):
         self.notification_enabled = True
-        self.observers = {}
+        self.observers = defaultdict(set)
 
     def add_observer(self, message, observer):
         """Add an observer for a specific message."""
-        observers = self.observers.setdefault(message, set())
-        observers.add(observer)
+        self.observers[message].add(observer)
 
     def remove_observer(self, observer):
         """Remove an observer."""
-        for _, observers in self.observers.items():
-            if observer in observers:
-                observers.remove(observer)
+        for observers in self.observers.values():
+            observers.discard(observer)
 
     def notify_observers(self, message, *args, **opts):
         """Pythonic signals and slots."""
