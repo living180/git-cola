@@ -7,6 +7,7 @@ from __future__ import division, absolute_import, unicode_literals
 import errno
 import os
 import os.path
+import re
 import select
 from collections import defaultdict
 from threading import Lock
@@ -116,11 +117,15 @@ if AVAILABLE == 'inotify':
         def __init__(self, monitor):
             _BaseThread.__init__(self, monitor)
             self._worktree = core.abspath(git.worktree())
+            self._git_dir = git.git_dir()
             self._lock = Lock()
             self._inotify_fd = None
             self._pipe_r = None
             self._pipe_w = None
-            self._wd_map = {}
+            self._worktree_wds = set()
+            self._worktree_wd_map = {}
+            self._git_dir_wds = set()
+            self._git_dir_wd_map = {}
 
         @staticmethod
         def _log_out_of_wds_message():
@@ -184,51 +189,74 @@ if AVAILABLE == 'inotify':
             with self._lock:
                 if self._inotify_fd is None:
                     return
-                watched_dirs = set(self._wd_map)
-                tracked_dirs = {os.path.dirname(os.path.join(self._worktree,
-                                                             path))
-                                for path in gitcmds.tracked_files()}
-                for path in watched_dirs - tracked_dirs:
-                    wd = self._wd_map.pop(path)
-                    try:
-                        inotify.rm_watch(self._inotify_fd, wd)
-                    except OSError as e:
-                        if e.errno == errno.EINVAL:
-                            # This error can occur if the target of the wd was
-                            # removed on the filesystem before we call
-                            # inotify.rm_watch() so ignore it.
-                            pass
-                        else:
-                            raise
-                for path in tracked_dirs - watched_dirs:
-                    try:
-                        wd = inotify.add_watch(self._inotify_fd,
-                                               core.encode(path),
-                                               self._ADD_MASK)
-                    except OSError as e:
-                        if e.errno == errno.ENOSPC:
-                            self._log_out_of_wds_message()
-                            self._running = False
-                            break
-                        elif e.errno in (errno.ENOENT, errno.ENOTDIR):
-                            # These two errors should only occur as a result of
-                            # race conditions:  the first if the directory
-                            # referenced by dirpath was removed or renamed
-                            # before the call to inotify.add_watch(); the
-                            # second if the directory referenced by dirpath was
-                            # replaced with a file before the call to
-                            # inotify.add_watch().  Therefore we simply ignore
-                            # them.
-                            pass
-                        else:
-                            raise
+                try:
+                    tracked_dirs = {os.path.dirname(os.path.join(
+                                                        self._worktree, path))
+                                    for path in gitcmds.tracked_files()}
+                    self._refresh_watches(tracked_dirs, self._worktree_wds,
+                                          self._worktree_wd_map)
+                    git_dirs = {self._git_dir}
+                    for dirpath, dirnames, filenames in core.walk(
+                            os.path.join(self._git_dir, 'refs')):
+                        git_dirs.add(dirpath)
+                    self._refresh_watches(git_dirs, self._git_dir_wds,
+                                          self._git_dir_wd_map)
+                except OSError as e:
+                    if e.errno == errno.ENOSPC:
+                        self._log_out_of_wds_message()
+                        self._running = False
                     else:
-                        self._wd_map[path] = wd
+                        raise
+
+        def _refresh_watches(self, paths_to_watch, wd_set, wd_map):
+            watched_paths = set(wd_map)
+            for path in watched_paths - paths_to_watch:
+                wd = wd_map.pop(path)
+                wd_set.remove(wd)
+                try:
+                    inotify.rm_watch(self._inotify_fd, wd)
+                except OSError as e:
+                    if e.errno == errno.EINVAL:
+                        # This error can occur if the target of the wd was
+                        # removed on the filesystem before we call
+                        # inotify.rm_watch() so ignore it.
+                        pass
+                    else:
+                        raise
+            for path in paths_to_watch - watched_paths:
+                try:
+                    wd = inotify.add_watch(self._inotify_fd, core.encode(path),
+                                           self._ADD_MASK)
+                except OSError as e:
+                    if e.errno in (errno.ENOENT, errno.ENOTDIR):
+                        # These two errors should only occur as a result of
+                        # race conditions:  the first if the directory
+                        # referenced by dirpath was removed or renamed
+                        # before the call to inotify.add_watch(); the
+                        # second if the directory referenced by dirpath was
+                        # replaced with a file before the call to
+                        # inotify.add_watch().  Therefore we simply ignore
+                        # them.
+                        pass
+                    else:
+                        raise
+                else:
+                    wd_set.add(wd)
+                    wd_map[path] = wd
 
         def _handle_events(self):
             for wd, mask, cookie, name in \
                     inotify.read_events(self._inotify_fd):
-                if mask & self._TRIGGER_MASK:
+                if (mask & self._TRIGGER_MASK
+                        and (wd in self._worktree_wds
+                            or (wd in self._git_dir_wds
+                                and not mask & inotify.IN_ISDIR
+                                and not core.decode(name).endswith('.lock')))):
+                    # Enable a pending refresh iff:
+                    # 1) the wd was for the worktree or
+                    # 2) the wd was for the git dir and
+                    #    a) the event was for a file, not a directory, and
+                    #    b) the file name does not end with ".lock"
                     self._pending = True
 
         def stop(self):
@@ -251,7 +279,11 @@ if AVAILABLE == 'pywin32':
         def __init__(self, monitor):
             _BaseThread.__init__(self, monitor)
             self._worktree = self._transform_path(core.abspath(git.worktree()))
-            self._git_dir = self._transform_path(git.git_dir())
+            # match paths starting with the git directory, capturing any
+            # subpath within the git directory
+            self._git_dir_pattern = re.compile(
+                    re.escape(self._transform_path(git.git_dir()))
+                    + r'(?:$|/(.*)$)')
             self._dir_handle = None
             self._buffer = None
             self._overlapped = None
@@ -322,8 +354,8 @@ if AVAILABLE == 'pywin32':
                 if not self._running:
                     break
                 path = self._worktree + '/' + self._transform_path(path)
-                if (path != self._git_dir
-                        and not path.startswith(self._git_dir + '/')):
+                m = self._git_dir_pattern.match(path)
+                if not m or m.group(1) and not m.group(1).endswith('.lock'):
                     self._pending = True
 
         def stop(self):
