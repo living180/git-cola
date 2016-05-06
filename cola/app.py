@@ -270,7 +270,7 @@ def application_init(args, update=False):
     return ApplicationContext(args, app, cfg, model)
 
 
-def application_start(context, view, monitor_refs_only=False):
+def application_start(context, view):
     """Show the GUI and start the main event loop"""
     # Store the view for session management
     context.app.set_view(view)
@@ -284,7 +284,7 @@ def application_start(context, view, monitor_refs_only=False):
     init_update_task(view, runtask, context.model)
 
     # Start the filesystem monitor thread
-    fsmonitor.current().start(monitor_refs_only)
+    fsmonitor.current().start()
 
     msg_timer = QtCore.QTimer()
     msg_timer.setSingleShot(True)
