@@ -21,7 +21,7 @@ IN_Q_OVERFLOW   = 0x00004000
 
 IN_ONLYDIR      = 0x01000000
 IN_EXCL_UNLINK  = 0x04000000
-IN_ISDIR        = 0x80000000
+IN_ISDIR        = 0x40000000
 
 
 class inotify_event(ctypes.Structure):
