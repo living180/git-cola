@@ -3,7 +3,6 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 
 from qtpy import QtWidgets
 from qtpy.QtCore import Qt
-from qtpy.QtCore import Signal
 
 from .. import cmds
 from .. import compat
@@ -158,8 +157,6 @@ class AddSubmodule(standard.Dialog):
 
 # pylint: disable=too-many-ancestors
 class SubmodulesTreeWidget(standard.TreeWidget):
-    updated = Signal()
-
     def __init__(self, context, parent=None):
         standard.TreeWidget.__init__(self, parent=parent)
 
@@ -174,8 +171,7 @@ class SubmodulesTreeWidget(standard.TreeWidget):
         # Connections
         # pylint: disable=no-member
         self.itemDoubleClicked.connect(self.tree_double_clicked)
-        self.updated.connect(self.refresh, type=Qt.QueuedConnection)
-        model.add_observer(model.message_submodules_changed, self.updated.emit)
+        model.submodules_changed.connect(self.refresh, type=Qt.QueuedConnection)
 
     def refresh(self):
         if not self._active:
