@@ -1205,10 +1205,6 @@ class Commit(QtWidgets.QGraphicsItem):
 
         self.edges = {}
 
-    def blockSignals(self, blocked):
-        """Disable notifications during sections that cause notification loops"""
-        self.notifier.notification_enabled = not blocked
-
     def itemChange(self, change, value):
         if change == QtWidgets.QGraphicsItem.ItemSelectedHasChanged:
             # Broadcast selection to other widgets
@@ -1502,8 +1498,7 @@ class GraphView(QtWidgets.QGraphicsView, ViewerMixin):
                 item = self.items[oid]
             except KeyError:
                 continue
-            with qtutils.BlockSignals(item):
-                item.setSelected(True)
+            item.setSelected(True)
             item_rect = item.sceneTransform().mapRect(item.boundingRect())
             self.ensureVisible(item_rect)
 
