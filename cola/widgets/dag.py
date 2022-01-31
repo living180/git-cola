@@ -1207,13 +1207,6 @@ class Commit(QtWidgets.QGraphicsItem):
 
     def itemChange(self, change, value):
         if change == QtWidgets.QGraphicsItem.ItemSelectedHasChanged:
-            # Broadcast selection to other widgets
-            selected_items = self.scene().selectedItems()
-            commits = [item.commit for item in selected_items]
-            self.scene().parent().set_selecting(True)
-            self.notifier.notify_observers(diff.COMMITS_SELECTED, commits)
-            self.scene().parent().set_selecting(False)
-
             # Cache the pen for use in paint()
             if value:
                 self.brush = self.commit_selected_color
@@ -1425,6 +1418,9 @@ class GraphView(QtWidgets.QGraphicsView, ViewerMixin):
         scene.setItemIndexMethod(QtWidgets.QGraphicsScene.NoIndex)
         self.setScene(scene)
 
+        # pylint: disable=no-member
+        scene.selectionChanged.connect(self.selection_changed)
+
         self.setRenderHint(QtGui.QPainter.Antialiasing)
         self.setViewportUpdateMode(self.BoundingRectViewportUpdate)
         self.setCacheMode(QtWidgets.QGraphicsView.CacheBackground)
@@ -1484,6 +1480,14 @@ class GraphView(QtWidgets.QGraphicsView, ViewerMixin):
 
     def zoom_out(self):
         self.scale_view(1.0 / 1.5)
+
+    def selection_changed(self):
+        # Broadcast selection to other widgets
+        selected_items = self.scene().selectedItems()
+        commits = [item.commit for item in selected_items]
+        self.set_selecting(True)
+        self.notifier.notify_observers(diff.COMMITS_SELECTED, commits)
+        self.set_selecting(False)
 
     def commits_selected(self, commits):
         if self.selecting:
